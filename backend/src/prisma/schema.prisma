@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String     @id @default(uuid())
+  name      String
+  email     String     @unique
+  password  String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  campaigns Campaign[]
+}
+
+model Campaign {
+  id           String             @id @default(uuid())
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brandName    String
+  productName  String
+  industry     String             @default("General")
+  audience     String
+  tone         String
+  platform     String
+  goal         String
+  keywords     String?
+  competitors  String?
+  callToAction String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  contents     GeneratedContent[]
+}
+
+model GeneratedContent {
+  id         String   @id @default(uuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  type       String   // CAPTION, HASHTAGS, AD_COPY, BLOG, EMAIL, IMAGE_PROMPT, VIDEO_SCRIPT, VOICE_OVER
+  content    String   // Store JSON stringified payload of structured content
+  version    Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
