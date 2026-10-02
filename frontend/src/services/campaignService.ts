@@ -186,10 +186,43 @@ export class CampaignService {
     }
   }
 
+  static async fetchAIStatus(): Promise<{ provider: string; status: string; model: string }> {
+    try {
+      const res = await api.get('/status');
+      if (res.data && res.data.status) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Backend status endpoint offline. Assuming Demo Mode.');
+    }
+    return { provider: 'unavailable', status: 'Backend Unavailable', model: 'N/A' };
+  }
+
+  static async createCampaign(input: CampaignInput): Promise<FullCampaignOutput> {
+    let res;
+    try {
+      res = await api.post('/generate', input);
+    } catch (err: any) {
+      const message = err.response?.data?.message;
+      throw new Error(typeof message === 'string' ? message : 'Unable to reach the generation service. Check that the backend is running and try again.');
+    }
+
+    if (!res.data?.campaign || !res.data?.contents) {
+      throw new Error('The backend returned an incomplete campaign response. Please try again.');
+    }
+
+    const output: FullCampaignOutput = {
+      campaign: res.data.campaign,
+      contents: res.data.contents,
+    };
+    this.saveCampaign(output);
+    return output;
+  }
+
   static async fetchAllCampaigns(): Promise<FullCampaignOutput[]> {
     try {
       const res = await api.get('/campaigns');
-      if (res.data && Array.isArray(res.data.campaigns)) {
+      if (res.data && Array.isArray(res.data.campaigns) && res.data.campaigns.length > 0) {
         return res.data.campaigns;
       }
     } catch (err) {
@@ -211,6 +244,33 @@ export class CampaignService {
     return all.find(item => item.campaign.id === id) || null;
   }
 
+  static async regenerateFormat(campaignId: string, type: string, input: CampaignInput): Promise<{ output: any; version?: number }> {
+    try {
+      const res = await api.put('/generate/regenerate', { campaignId, type, input });
+      if (res.data && res.data.output) {
+        return { output: res.data.output, version: res.data.version };
+      }
+      throw new Error('The backend returned an incomplete regeneration response. Please try again.');
+    } catch (err: any) {
+      const message = err.response?.data?.message;
+      throw new Error(typeof message === 'string' ? message : err.message || 'Unable to reach the regeneration service. Check that the backend is running and try again.');
+    }
+  }
+
+  static async updateGeneratedContent(
+    campaignId: string,
+    type: string,
+    content: GeneratedContentItem['content'],
+  ): Promise<{ version: number; updatedAt: string }> {
+    try {
+      const res = await api.put(`/campaigns/${campaignId}/contents/${type}`, { content });
+      return { version: res.data.version, updatedAt: res.data.updatedAt };
+    } catch (err: any) {
+      const message = err.response?.data?.message;
+      throw new Error(typeof message === 'string' ? message : 'Unable to save this content. Check that the backend is running and try again.');
+    }
+  }
+
   static saveCampaign(campaignOutput: FullCampaignOutput): void {
     const campaigns = this.getCampaigns();
     const index = campaigns.findIndex(c => c.campaign.id === campaignOutput.campaign.id);
@@ -225,6 +285,7 @@ export class CampaignService {
   static deleteCampaign(id: string): void {
     const campaigns = this.getCampaigns().filter(c => c.campaign.id !== id);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(campaigns));
+    api.delete(`/campaigns/${id}`).catch(() => {});
   }
 
   static duplicateCampaign(id: string): FullCampaignOutput | null {
@@ -238,7 +299,6 @@ export class CampaignService {
     duplicated.campaign.createdAt = new Date().toISOString();
     duplicated.campaign.updatedAt = new Date().toISOString();
 
-    // Update campaignId on contents
     Object.keys(duplicated.contents).forEach(key => {
       const item = duplicated.contents[key as keyof typeof duplicated.contents];
       if (item) {

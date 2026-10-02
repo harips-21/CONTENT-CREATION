@@ -26,10 +26,21 @@ export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<FullCampaignOutput[]>([]);
+  const [aiStatusInfo, setAiStatusInfo] = useState<{ provider: string; status: string; model: string }>({
+    provider: 'mock',
+    status: 'Demo Mode',
+    model: 'N/A',
+  });
 
   useEffect(() => {
     loadCampaigns();
+    loadAIStatus();
   }, []);
+
+  const loadAIStatus = async () => {
+    const status = await CampaignService.fetchAIStatus();
+    setAiStatusInfo(status);
+  };
 
   const loadCampaigns = async () => {
     const list = await CampaignService.fetchAllCampaigns();
@@ -129,13 +140,25 @@ export const DashboardPage: React.FC = () => {
 
         <div className="glass-card p-5 rounded-2xl border border-slate-200/80 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase text-slate-500 tracking-wider">AI Engine</span>
-            <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
+            <span className="text-xs font-semibold uppercase text-slate-500 tracking-wider">AI Status</span>
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+              aiStatusInfo.status === 'Gemini Configured' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
+            }`}>
               <Sparkles className="w-5 h-5" />
             </div>
           </div>
-          <div className="text-2xl font-extrabold text-emerald-600">Active</div>
-          <p className="text-xs text-slate-500 font-medium">Auto-fallback & API Ready</p>
+          <div className={`text-2xl font-extrabold ${
+            aiStatusInfo.status === 'Gemini Configured' ? 'text-emerald-600' : 'text-amber-600'
+          }`}>
+            {aiStatusInfo.status === 'Gemini Configured' ? 'REAL AI · Gemini' : aiStatusInfo.status === 'Demo Mode' ? 'DEMO MODE' : 'Unavailable'}
+          </div>
+          <p className="text-xs text-slate-500 font-medium">
+            {aiStatusInfo.status === 'Gemini Configured'
+              ? `Gemini configured · Model: ${aiStatusInfo.model}`
+              : aiStatusInfo.status === 'Demo Mode'
+                ? 'Mock provider active'
+                : 'Backend status could not be reached'}
+          </p>
         </div>
       </div>
 

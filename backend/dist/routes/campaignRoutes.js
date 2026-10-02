@@ -7,5 +7,6 @@ const router = (0, express_1.Router)();
 router.post('/', authMiddleware_1.authenticateToken, campaignController_1.createCampaign);
 router.get('/', authMiddleware_1.authenticateToken, campaignController_1.getCampaigns);
 router.get('/:id', authMiddleware_1.authenticateToken, campaignController_1.getCampaignById);
+router.put('/:id/contents/:type', authMiddleware_1.authenticateToken, campaignController_1.updateGeneratedContent);
 router.delete('/:id', authMiddleware_1.authenticateToken, campaignController_1.deleteCampaign);
 exports.default = router;

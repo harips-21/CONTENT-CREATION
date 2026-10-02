@@ -27,3 +27,10 @@ export interface IAIProvider {
   generateCampaignContent(input: CampaignPromptInput): Promise<GeneratedOutputs>;
   regenerateSingleFormat(type: string, input: CampaignPromptInput): Promise<any>;
 }
+
+export class AIProviderError extends Error {
+  constructor(message: string, public statusCode: number = 502) {
+    super(message);
+    this.name = 'AIProviderError';
+  }
+}

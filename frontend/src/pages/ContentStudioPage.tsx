@@ -35,6 +35,8 @@ export const ContentStudioPage: React.FC = () => {
   const [copiedType, setCopiedType] = useState<string | null>(null);
   const [editingType, setEditingType] = useState<ContentType | null>(null);
   const [editBuffer, setEditBuffer] = useState<string>('');
+  const [pendingAction, setPendingAction] = useState<ContentType | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [versionHistory, setVersionHistory] = useState<Record<ContentType, number>>({
     CAPTION: 1,
     HASHTAGS: 1,
@@ -56,6 +58,10 @@ export const ContentStudioPage: React.FC = () => {
     const data = await CampaignService.getCampaignById(campaignId);
     if (data) {
       setCampaignData(data);
+      setVersionHistory((current) => ({
+        ...current,
+        ...Object.fromEntries(Object.entries(data.contents).map(([type, item]) => [type, item.version])),
+      }));
     } else {
       navigate('/dashboard');
     }
@@ -85,59 +91,80 @@ export const ContentStudioPage: React.FC = () => {
     setEditBuffer(currentText);
   };
 
-  const handleSaveEdit = (type: ContentType) => {
+  const handleSaveEdit = async (type: ContentType) => {
     if (!campaignData) return;
 
-    const updatedContents = { ...campaignData.contents };
-    const targetItem = updatedContents[type];
-
+    const targetItem = campaignData.contents[type];
     if (targetItem) {
-      // Increment version
-      const newVersion = targetItem.version + 1;
-      targetItem.version = newVersion;
-      targetItem.updatedAt = new Date().toISOString();
+      const editableFields: Partial<Record<ContentType, string>> = {
+        CAPTION: 'caption',
+        EMAIL: 'body',
+        BLOG: 'introduction',
+        IMAGE_PROMPT: 'prompt',
+        VOICE_OVER: 'narration',
+        AD_COPY: 'primaryText',
+      };
+      const field = editableFields[type];
+      if (!field) return;
 
-      if (type === 'CAPTION') {
-        (targetItem.content as any).caption = editBuffer;
-      } else if (type === 'EMAIL') {
-        (targetItem.content as any).body = editBuffer;
-      } else if (type === 'BLOG') {
-        (targetItem.content as any).introduction = editBuffer;
-      } else if (type === 'IMAGE_PROMPT') {
-        (targetItem.content as any).prompt = editBuffer;
-      } else if (type === 'VOICE_OVER') {
-        (targetItem.content as any).narration = editBuffer;
-      } else if (type === 'AD_COPY') {
-        (targetItem.content as any).primaryText = editBuffer;
+      setActionError(null);
+      setPendingAction(type);
+      const updatedContent = {
+        ...(targetItem.content as Record<string, any>),
+        [field]: editBuffer,
+      };
+
+      try {
+        const saved = await CampaignService.updateGeneratedContent(campaign.id, type, updatedContent as GeneratedContentItem['content']);
+        const updatedItem = {
+          ...targetItem,
+          content: updatedContent as GeneratedContentItem['content'],
+          version: saved.version,
+          updatedAt: saved.updatedAt,
+        };
+        const updatedCampaign = {
+          ...campaignData,
+          contents: { ...campaignData.contents, [type]: updatedItem },
+        };
+        setCampaignData(updatedCampaign);
+        setVersionHistory(prev => ({ ...prev, [type]: saved.version }));
+        CampaignService.saveCampaign(updatedCampaign);
+        setEditingType(null);
+      } catch (err: any) {
+        setActionError(err.message || 'Unable to save this content. Please try again.');
+      } finally {
+        setPendingAction(null);
       }
-
-      setVersionHistory(prev => ({ ...prev, [type]: newVersion }));
-      CampaignService.saveCampaign(campaignData);
     }
-
-    setEditingType(null);
   };
 
-  const handleRegenerate = (type: ContentType) => {
+  const handleRegenerate = async (type: ContentType) => {
     if (!campaignData) return;
-    // Simulate targeted regeneration and version increment
-    const updatedContents = { ...campaignData.contents };
-    const targetItem = updatedContents[type];
+    const targetItem = campaignData.contents[type];
 
     if (targetItem) {
-      const newVersion = targetItem.version + 1;
-      targetItem.version = newVersion;
-      targetItem.updatedAt = new Date().toISOString();
-
-      // Slightly mutate copy to show fresh variation
-      if (type === 'CAPTION') {
-        (targetItem.content as any).caption = `🔥 [Variation ${newVersion}] ${ (targetItem.content as any).caption }`;
-      } else if (type === 'AD_COPY') {
-        (targetItem.content as any).headline = `✨ [New Angle] ${ (targetItem.content as any).headline }`;
+      setActionError(null);
+      setPendingAction(type);
+      try {
+        const regenerated = await CampaignService.regenerateFormat(campaign.id, type, campaign);
+        const updatedItem = {
+          ...targetItem,
+          content: regenerated.output,
+          version: regenerated.version ?? targetItem.version + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        const updatedCampaign = {
+          ...campaignData,
+          contents: { ...campaignData.contents, [type]: updatedItem },
+        };
+        setCampaignData(updatedCampaign);
+        setVersionHistory(prev => ({ ...prev, [type]: updatedItem.version }));
+        CampaignService.saveCampaign(updatedCampaign);
+      } catch (err: any) {
+        setActionError(err.message || 'Unable to regenerate this content. Please try again.');
+      } finally {
+        setPendingAction(null);
       }
-
-      setVersionHistory(prev => ({ ...prev, [type]: newVersion }));
-      CampaignService.saveCampaign(campaignData);
     }
   };
 
@@ -155,39 +182,192 @@ export const ContentStudioPage: React.FC = () => {
   // Download PDF Report
   const downloadPDF = () => {
     const doc = new jsPDF();
-    doc.setFontSize(20);
-    doc.setTextColor(37, 99, 235); // Brand Blue
-    doc.text(`AI Content Studio Report`, 14, 22);
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    let y = 20;
 
-    doc.setFontSize(12);
-    doc.setTextColor(51, 65, 85);
-    doc.text(`Brand: ${campaign.brandName}`, 14, 32);
-    doc.text(`Product: ${campaign.productName}`, 14, 39);
-    doc.text(`Platform: ${campaign.platform} | Goal: ${campaign.goal} | Tone: ${campaign.tone}`, 14, 46);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 53);
+    const cleanText = (value: unknown): string => {
+      if (typeof value === 'string') {
+        const normalized = value
+          .replace(/```(?:json)?/gi, '')
+          .replace(/```/g, '')
+          .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+          .replace(/\*\*(.*?)\*\*/g, '$1')
+          .replace(/`/g, '')
+          .trim();
+        if (normalized.startsWith('{') || normalized.startsWith('[')) {
+          try {
+            return cleanText(JSON.parse(normalized));
+          } catch {
+            return normalized;
+          }
+        }
+        return normalized;
+      }
+      if (typeof value === 'number') return String(value);
+      if (Array.isArray(value)) return value.map(cleanText).filter(Boolean).map((item) => `• ${item}`).join('\n');
+      if (value && typeof value === 'object') {
+        return Object.entries(value)
+          .map(([key, item]) => `${key.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase())}: ${cleanText(item)}`)
+          .filter((line) => !line.endsWith(': '))
+          .join('\n');
+      }
+      return '';
+    };
 
-    doc.line(14, 58, 196, 58);
-
-    let y = 68;
-
-    Object.entries(contents).forEach(([typeKey, item]) => {
-      if (y > 260) {
+    const ensureSpace = (lineHeight: number) => {
+      if (y + lineHeight > pageHeight - 18) {
         doc.addPage();
         y = 20;
       }
-      doc.setFontSize(14);
-      doc.setTextColor(30, 41, 59);
-      doc.text(`[${typeKey}] (v${item.version})`, 14, y);
-      y += 8;
+    };
 
-      doc.setFontSize(10);
-      doc.setTextColor(71, 85, 105);
-      const stringified = typeof item.content === 'string' ? item.content : JSON.stringify(item.content, null, 2);
-      const lines = doc.splitTextToSize(stringified, 180);
-      doc.text(lines, 14, y);
-      y += lines.length * 5 + 10;
-    });
+    const writeText = (
+      value: unknown,
+      options: { size?: number; bold?: boolean; color?: [number, number, number]; indent?: number; lineHeight?: number } = {},
+    ) => {
+      const text = cleanText(value);
+      if (!text) return;
 
+      const size = options.size ?? 10;
+      const lineHeight = options.lineHeight ?? 5;
+      const indent = options.indent ?? 0;
+      doc.setFont('helvetica', options.bold ? 'bold' : 'normal');
+      doc.setFontSize(size);
+      doc.setTextColor(...(options.color ?? [55, 65, 81]));
+      const lines = doc.splitTextToSize(text, pageWidth - margin * 2 - indent);
+      lines.forEach((line: string) => {
+        ensureSpace(lineHeight);
+        doc.text(line, margin + indent, y);
+        y += lineHeight;
+      });
+    };
+
+    const addSection = (title: string) => {
+      y += 5;
+      ensureSpace(9);
+      writeText(title, { size: 13, bold: true, color: [30, 41, 59], lineHeight: 7 });
+      doc.setDrawColor(203, 213, 225);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 5;
+    };
+
+    const addLabel = (label: string, value: unknown) => {
+      const text = cleanText(value);
+      if (!text) return;
+      writeText(`${label}:`, { bold: true, color: [51, 65, 85], lineHeight: 5 });
+      writeText(text, { indent: 3, lineHeight: 5 });
+      y += 2;
+    };
+
+    const getContent = (type: ContentType): Record<string, any> => {
+      const value: unknown = contents[type]?.content;
+      if (typeof value === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(value);
+          return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, any> : { text: value };
+        } catch {
+          return { text: value };
+        }
+      }
+      return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : { text: value };
+    };
+
+    const flattenText = (value: unknown): string[] => {
+      if (typeof value === 'string' || typeof value === 'number') return [cleanText(value)].filter(Boolean);
+      if (Array.isArray(value)) return value.flatMap(flattenText);
+      if (value && typeof value === 'object') return Object.values(value).flatMap(flattenText);
+      return [];
+    };
+
+    const addBullets = (values: unknown) => {
+      flattenText(values).forEach((value) => writeText(`• ${value}`, { indent: 3, lineHeight: 5 }));
+    };
+
+    writeText('AI CONTENT STUDIO', { size: 20, bold: true, color: [37, 99, 235], lineHeight: 9 });
+    writeText('Campaign Report', { size: 14, bold: true, color: [30, 41, 59], lineHeight: 7 });
+    writeText(`Generated: ${new Date().toLocaleDateString()}`, { size: 9, color: [100, 116, 139], lineHeight: 5 });
+
+    addSection('BRAND INFORMATION');
+    addLabel('Brand Name', campaign.brandName);
+    addLabel('Product Name', campaign.productName);
+    addLabel('Industry', campaign.industry);
+    addLabel('Target Audience', campaign.audience);
+    addLabel('Campaign Goal', campaign.goal);
+    addLabel('Tone', campaign.tone);
+    addLabel('Platform', campaign.platform);
+    addLabel('Keywords', campaign.keywords);
+    addLabel('Competitors', campaign.competitors);
+    addLabel('Custom CTA', campaign.callToAction);
+
+    addSection('GENERATED CONTENT');
+
+    const caption = getContent('CAPTION');
+    addSection('1. SOCIAL MEDIA CAPTION');
+    writeText(caption.caption ?? caption.text);
+
+    const hashtags = getContent('HASHTAGS');
+    addSection('2. HASHTAGS');
+    writeText(flattenText(hashtags).join(' '));
+
+    const adCopy = getContent('AD_COPY');
+    addSection('3. ADVERTISEMENT COPY');
+    addLabel('Headline', adCopy.headline);
+    addLabel('Body', adCopy.primaryText);
+    addLabel('CTA', adCopy.callToAction);
+    if (adCopy.shortAd) addLabel('Short Ad', adCopy.shortAd);
+    if (adCopy.longAd) addLabel('Long Ad', adCopy.longAd);
+
+    const blog = getContent('BLOG');
+    addSection('4. BLOG CONTENT');
+    addLabel('Title', blog.title);
+    if (Array.isArray(blog.seoOutline)) {
+      writeText('Outline:', { bold: true });
+      addBullets(blog.seoOutline);
+    }
+    addLabel('Introduction', blog.introduction);
+    if (Array.isArray(blog.sections)) {
+      blog.sections.forEach((section: any, index: number) => {
+        addLabel(section.heading || `Section ${index + 1}`, section.body);
+      });
+    }
+    addLabel('Conclusion', blog.conclusion);
+
+    const email = getContent('EMAIL');
+    addSection('5. EMAIL MARKETING');
+    addLabel('Subject', email.subjectLine);
+    addLabel('Email', email.body);
+    addLabel('CTA', email.callToAction);
+
+    const imagePrompt = getContent('IMAGE_PROMPT');
+    addSection('6. IMAGE PROMPT');
+    writeText(imagePrompt.prompt ?? imagePrompt.text);
+
+    const video = getContent('VIDEO_SCRIPT');
+    addSection('7. VIDEO SCRIPT');
+    addLabel('Hook', video.hook);
+    if (Array.isArray(video.scenes)) {
+      video.scenes.forEach((scene: any, index: number) => {
+        const sceneLabel = scene.time ? `Scene ${index + 1} (${scene.time})` : `Scene ${index + 1}`;
+        addLabel(sceneLabel, [scene.visualHook, scene.onScreenText, scene.voiceOver].filter(Boolean).join('\n'));
+      });
+    }
+    addLabel('CTA', video.callToAction);
+
+    const voiceOver = getContent('VOICE_OVER');
+    addSection('8. VOICE-OVER SCRIPT');
+    writeText(voiceOver.narration ?? voiceOver.text);
+
+    const pageCount = doc.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page += 1) {
+      doc.setPage(page);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.text('Generated with AI Content Studio. For human review before publishing.', margin, pageHeight - 9);
+      doc.text(`${page} / ${pageCount}`, pageWidth - margin, pageHeight - 9, { align: 'right' });
+    }
     doc.save(`${campaign.brandName}_Full_Campaign_Report.pdf`);
   };
 
@@ -243,6 +423,12 @@ export const ContentStudioPage: React.FC = () => {
         </div>
       </div>
 
+      {actionError && (
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          {actionError}
+        </div>
+      )}
+
       {/* Tabs Navigation */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
         {tabs.map((tab) => {
@@ -281,10 +467,11 @@ export const ContentStudioPage: React.FC = () => {
               <div className="flex items-center gap-1.5 text-xs">
                 <button
                   onClick={() => handleRegenerate('CAPTION')}
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-brand-600 hover:bg-slate-100"
+                  disabled={pendingAction === 'CAPTION'}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-brand-600 hover:bg-slate-100 disabled:opacity-50"
                   title="Regenerate Variation"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <RefreshCw className={`w-3.5 h-3.5 ${pendingAction === 'CAPTION' ? 'animate-spin' : ''}`} />
                 </button>
                 <button
                   onClick={() => handleCopy('CAPTION', (contents.CAPTION?.content as any)?.caption)}
@@ -320,9 +507,10 @@ export const ContentStudioPage: React.FC = () => {
                   </button>
                   <button
                     onClick={() => handleSaveEdit('CAPTION')}
-                    className="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold flex items-center gap-1"
+                    disabled={pendingAction === 'CAPTION'}
+                    className="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold flex items-center gap-1 disabled:opacity-50"
                   >
-                    <Save className="w-3.5 h-3.5" /> Save Revision
+                    <Save className="w-3.5 h-3.5" /> {pendingAction === 'CAPTION' ? 'Saving...' : 'Save Revision'}
                   </button>
                 </div>
               </div>

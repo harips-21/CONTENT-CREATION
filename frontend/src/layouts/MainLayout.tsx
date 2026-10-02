@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { CampaignService } from '../services/campaignService';
 import { 
   LayoutDashboard, 
   PlusCircle, 
@@ -21,6 +22,17 @@ export const MainLayout: React.FC = () => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [aiStatus, setAIStatus] = useState('Checking AI status');
+
+  useEffect(() => {
+    let isCurrent = true;
+    CampaignService.fetchAIStatus().then((status) => {
+      if (isCurrent) setAIStatus(status.status);
+    });
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -132,9 +144,15 @@ export const MainLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              AI Engine Ready
+            <span className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium ${
+              aiStatus === 'Gemini Configured'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : aiStatus === 'Demo Mode'
+                  ? 'bg-amber-50 border-amber-200 text-amber-700'
+                  : 'bg-slate-50 border-slate-200 text-slate-600'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${aiStatus === 'Gemini Configured' ? 'bg-emerald-500' : aiStatus === 'Demo Mode' ? 'bg-amber-500' : 'bg-slate-400'}`}></span>
+              {aiStatus === 'Gemini Configured' ? 'REAL AI · Gemini configured' : aiStatus === 'Demo Mode' ? 'DEMO MODE · Mock provider' : aiStatus}
             </span>
 
             {/* Quick Action Button for Mobile / Header */}

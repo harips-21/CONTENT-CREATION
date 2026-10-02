@@ -10,6 +10,7 @@ const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const campaignRoutes_1 = __importDefault(require("./routes/campaignRoutes"));
 const generateRoutes_1 = __importDefault(require("./routes/generateRoutes"));
 const historyRoutes_1 = __importDefault(require("./routes/historyRoutes"));
+const gemini_1 = require("./services/gemini");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -17,14 +18,22 @@ const PORT = process.env.PORT || 5000;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true }));
-// Health Check
+// Health & AI Status Check
 app.get('/api/health', (req, res) => {
+    const aiStatus = (0, gemini_1.getAIStatusInfo)();
     res.json({
         status: 'online',
         app: 'AI Content Studio API',
-        version: '1.0.0',
+        version: '2.0.0',
+        aiStatus: aiStatus.status,
+        provider: aiStatus.provider,
+        model: aiStatus.model,
         timestamp: new Date().toISOString(),
     });
+});
+app.get('/api/status', (req, res) => {
+    const aiStatus = (0, gemini_1.getAIStatusInfo)();
+    res.json(aiStatus);
 });
 // API Routes
 app.use('/api/auth', authRoutes_1.default);
@@ -40,5 +49,6 @@ app.use((err, req, res, next) => {
 });
 app.listen(PORT, () => {
     console.log(`🚀 AI Content Studio Backend listening on http://localhost:${PORT}`);
+    console.log(`🤖 AI Provider Status: ${(0, gemini_1.getAIStatusInfo)().status}`);
 });
 exports.default = app;

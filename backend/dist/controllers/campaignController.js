@@ -1,8 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteCampaign = exports.getCampaignById = exports.getCampaigns = exports.createCampaign = void 0;
+exports.updateGeneratedContent = exports.deleteCampaign = exports.getCampaignById = exports.getCampaigns = exports.createCampaign = void 0;
 const client_1 = require("../prisma/client");
-const gemini_1 = require("../services/gemini");
+const aiProvider_1 = require("../services/aiProvider");
+const campaignGeneration_1 = require("../services/campaignGeneration");
 const createCampaign = async (req, res) => {
     try {
         const userId = req.user?.id || 'demo-user-123';
@@ -11,25 +12,7 @@ const createCampaign = async (req, res) => {
             res.status(400).json({ message: 'Missing required campaign fields.' });
             return;
         }
-        // 1. Save campaign in DB
-        const campaign = await client_1.prisma.campaign.create({
-            data: {
-                userId,
-                brandName,
-                productName,
-                industry,
-                audience,
-                goal,
-                tone,
-                platform,
-                keywords,
-                competitors,
-                callToAction,
-            },
-        });
-        // 2. Generate content via AI Provider
-        const aiProvider = (0, gemini_1.getAIProvider)();
-        const generatedOutputs = await aiProvider.generateCampaignContent({
+        const generated = await (0, campaignGeneration_1.generateAndPersistCampaign)({
             brandName,
             productName,
             industry,
@@ -40,37 +23,19 @@ const createCampaign = async (req, res) => {
             keywords,
             competitors,
             callToAction,
-        });
-        // 3. Save contents in DB
-        const createdContents = {};
-        for (const [type, payload] of Object.entries(generatedOutputs)) {
-            const dbContent = await client_1.prisma.generatedContent.create({
-                data: {
-                    campaignId: campaign.id,
-                    type,
-                    content: JSON.stringify(payload),
-                    version: 1,
-                },
-            });
-            createdContents[type] = {
-                id: dbContent.id,
-                campaignId: dbContent.campaignId,
-                type: dbContent.type,
-                content: payload,
-                version: dbContent.version,
-                createdAt: dbContent.createdAt,
-                updatedAt: dbContent.updatedAt,
-            };
-        }
+        }, userId);
         res.status(201).json({
             message: 'Campaign created and content generated successfully.',
-            campaign,
-            contents: createdContents,
+            ...generated,
         });
     }
     catch (error) {
-        console.error('Create campaign error:', error);
-        res.status(500).json({ message: 'Error creating campaign.' });
+        if (error instanceof aiProvider_1.AIProviderError) {
+            res.status(error.statusCode).json({ message: error.message });
+            return;
+        }
+        console.error('Create campaign failed:', error instanceof Error ? error.message : 'Unexpected error');
+        res.status(500).json({ message: 'Unable to create the campaign right now. Please try again.' });
     }
 };
 exports.createCampaign = createCampaign;
@@ -125,7 +90,7 @@ const getCampaigns = async (req, res) => {
 exports.getCampaigns = getCampaigns;
 const getCampaignById = async (req, res) => {
     try {
-        const { id } = req.params;
+        const id = String(req.params.id);
         const c = await client_1.prisma.campaign.findUnique({
             where: { id },
             include: { contents: true },
@@ -158,7 +123,7 @@ const getCampaignById = async (req, res) => {
 exports.getCampaignById = getCampaignById;
 const deleteCampaign = async (req, res) => {
     try {
-        const { id } = req.params;
+        const id = String(req.params.id);
         await client_1.prisma.campaign.delete({ where: { id } });
         res.json({ message: 'Campaign deleted successfully.' });
     }
@@ -167,3 +132,34 @@ const deleteCampaign = async (req, res) => {
     }
 };
 exports.deleteCampaign = deleteCampaign;
+const updateGeneratedContent = async (req, res) => {
+    try {
+        const campaignId = String(req.params.id);
+        const type = String(req.params.type);
+        const allowedTypes = ['CAPTION', 'HASHTAGS', 'AD_COPY', 'BLOG', 'EMAIL', 'IMAGE_PROMPT', 'VIDEO_SCRIPT', 'VOICE_OVER'];
+        const { content } = req.body;
+        if (!allowedTypes.includes(type) || content === undefined || content === null) {
+            res.status(400).json({ message: 'A valid content format and content value are required.' });
+            return;
+        }
+        const existing = await client_1.prisma.generatedContent.findFirst({ where: { campaignId, type } });
+        if (!existing) {
+            res.status(404).json({ message: 'Generated content was not found.' });
+            return;
+        }
+        const updated = await client_1.prisma.generatedContent.update({
+            where: { id: existing.id },
+            data: { content: JSON.stringify(content), version: existing.version + 1 },
+        });
+        res.json({
+            content,
+            version: updated.version,
+            updatedAt: updated.updatedAt,
+        });
+    }
+    catch (error) {
+        console.error('Save generated content failed:', error instanceof Error ? error.message : 'Unexpected error');
+        res.status(500).json({ message: 'Unable to save this content right now. Please try again.' });
+    }
+};
+exports.updateGeneratedContent = updateGeneratedContent;

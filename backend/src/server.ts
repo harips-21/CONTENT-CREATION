@@ -5,6 +5,7 @@ import authRoutes from './routes/authRoutes';
 import campaignRoutes from './routes/campaignRoutes';
 import generateRoutes from './routes/generateRoutes';
 import historyRoutes from './routes/historyRoutes';
+import { getAIStatusInfo } from './services/gemini';
 
 dotenv.config();
 
@@ -16,14 +17,23 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Health Check
+// Health & AI Status Check
 app.get('/api/health', (req: Request, res: Response) => {
+  const aiStatus = getAIStatusInfo();
   res.json({
     status: 'online',
     app: 'AI Content Studio API',
-    version: '1.0.0',
+    version: '2.0.0',
+    aiStatus: aiStatus.status,
+    provider: aiStatus.provider,
+    model: aiStatus.model,
     timestamp: new Date().toISOString(),
   });
+});
+
+app.get('/api/status', (req: Request, res: Response) => {
+  const aiStatus = getAIStatusInfo();
+  res.json(aiStatus);
 });
 
 // API Routes
@@ -42,6 +52,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 AI Content Studio Backend listening on http://localhost:${PORT}`);
+  console.log(`🤖 AI Provider Status: ${getAIStatusInfo().status}`);
 });
 
 export default app;

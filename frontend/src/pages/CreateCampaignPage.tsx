@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { AIGeneratorEngine } from '../services/aiGenerator';
 import { CampaignService } from '../services/campaignService';
+import { AIGeneratorEngine } from '../services/aiGenerator';
 import { CampaignInput, CampaignGoal, ToneType, PlatformType } from '../types';
 import { 
   Sparkles, 
@@ -38,7 +38,7 @@ export const CreateCampaignPage: React.FC = () => {
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generationStep, setGenerationStep] = useState(0);
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   const goals: CampaignGoal[] = ['Product Launch', 'Brand Awareness', 'Sales', 'Engagement', 'Event Promotion'];
   const tones: ToneType[] = ['Professional', 'Friendly', 'Luxury', 'Funny', 'Bold', 'Minimal', 'Emotional'];
@@ -88,27 +88,31 @@ export const CreateCampaignPage: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.brandName || !formData.productName || !formData.audience) {
       alert('Please fill in Brand Name, Product Name, and Target Audience.');
       return;
     }
 
+    setGenerationError(null);
     setIsGenerating(true);
-    setGenerationStep(1);
-
-    // Simulate multi-step progress steps
-    setTimeout(() => setGenerationStep(2), 700);
-    setTimeout(() => setGenerationStep(3), 1400);
-    setTimeout(() => setGenerationStep(4), 2100);
-
-    setTimeout(() => {
-      const fullOutput = AIGeneratorEngine.generateFullCampaign(formData, user?.id || 'demo-user');
-      CampaignService.saveCampaign(fullOutput);
+    try {
+      const fullOutput = await CampaignService.createCampaign(formData);
       setIsGenerating(false);
       navigate(`/studio/${fullOutput.campaign.id}`);
-    }, 2800);
+    } catch (err: any) {
+      console.warn("Backend creation failed. Using client fallback engine:", err);
+      try {
+        const fallbackOutput = AIGeneratorEngine.generateFullCampaign(formData, user?.id || 'demo-user');
+        CampaignService.saveCampaign(fallbackOutput);
+        setIsGenerating(false);
+        navigate(`/studio/${fallbackOutput.campaign.id}`);
+      } catch (fallbackErr: any) {
+        setGenerationError('Unable to generate content right now. Please check form inputs and try again.');
+        setIsGenerating(false);
+      }
+    }
   };
 
   return (
@@ -168,27 +172,7 @@ export const CreateCampaignPage: React.FC = () => {
 
             <div className="space-y-2">
               <h3 className="text-xl font-extrabold text-slate-900">Generating AI Content</h3>
-              <p className="text-xs text-slate-500">Creating 8 tailored publish-ready formats...</p>
-            </div>
-
-            {/* Step Indicators */}
-            <div className="space-y-3 text-left bg-slate-50 p-4 rounded-xl text-xs">
-              <div className={`flex items-center gap-2.5 ${generationStep >= 1 ? 'text-brand-700 font-semibold' : 'text-slate-400'}`}>
-                {generationStep >= 1 ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Loader2 className="w-4 h-4 animate-spin" />}
-                Analyzing brand voice, audience & tone...
-              </div>
-              <div className={`flex items-center gap-2.5 ${generationStep >= 2 ? 'text-brand-700 font-semibold' : 'text-slate-400'}`}>
-                {generationStep >= 2 ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Loader2 className="w-4 h-4 animate-spin" />}
-                Generating captions, hashtags & ad copy...
-              </div>
-              <div className={`flex items-center gap-2.5 ${generationStep >= 3 ? 'text-brand-700 font-semibold' : 'text-slate-400'}`}>
-                {generationStep >= 3 ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Loader2 className="w-4 h-4 animate-spin" />}
-                Building video script & voice-over markers...
-              </div>
-              <div className={`flex items-center gap-2.5 ${generationStep >= 4 ? 'text-brand-700 font-semibold' : 'text-slate-400'}`}>
-                {generationStep >= 4 ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Loader2 className="w-4 h-4 animate-spin" />}
-                Crafting DALL-E & Midjourney visual prompts...
-              </div>
+              <p className="text-xs text-slate-500">Sending your campaign details to the AI provider...</p>
             </div>
           </div>
         </div>
@@ -389,6 +373,12 @@ export const CreateCampaignPage: React.FC = () => {
           </div>
         </div>
 
+        {generationError && (
+          <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            {generationError}
+          </div>
+        )}
+
         {/* Submit Action */}
         <div className="flex items-center justify-end gap-4 pt-2">
           <button
@@ -400,10 +390,11 @@ export const CreateCampaignPage: React.FC = () => {
           </button>
           <button
             type="submit"
+            disabled={isGenerating}
             className="inline-flex items-center gap-2.5 px-8 py-3.5 rounded-xl bg-gradient-brand text-white font-bold text-base shadow-xl shadow-brand-500/25 hover:opacity-95 hover:scale-[1.01] active:scale-[0.99] transition-all"
           >
-            <Sparkles className="w-5 h-5" />
-            Generate Content Studio
+            {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+            {isGenerating ? 'Generating...' : 'Generate Content Studio'}
           </button>
         </div>
       </form>
